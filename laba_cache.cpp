@@ -27,6 +27,7 @@ protected:
     int capacity_;
     List items_;
     Map map_;
+
 };
 
 class LRUCache : public Cache {
@@ -119,15 +120,16 @@ private:
     std::unordered_map<int, int> frequencies_;
 
     void update_position(List::iterator curr_it) {
-        int curr_key = curr_it->first;
-        int curr_freq = frequencies_[curr_key];
+        int curr_freq = frequencies_[curr_it->first];
 
         for (List::iterator it = items_.begin(); it != items_.end(); ++it) {
-            if (frequencies_[it->first] < curr_freq) {
+            if (it == curr_it) continue;
+            if (frequencies_[it->first] <= curr_freq) {
                 items_.splice(it, items_, curr_it);
                 return;
             }
         }
+        items_.splice(items_.end(), items_, curr_it);   // все остальные частотнее -> в конец
     }
 };
 
@@ -229,77 +231,75 @@ int fib(int n){
     return fib(n-1) + fib(n-2);
 };
 
-bool readData(const char* filename, std::vector<int>& data) {
-    std::ifstream in(filename);
-    if (!in) {
+struct Input {
+    std::vector<std::string> layers;   // названия слоёв по порядку
+    std::vector<int> data;             // последовательность обращений
+    int capacity;
+};
+
+bool readData(const char* filename, Input& in) {
+    std::ifstream f(filename);
+    if (!f) {
         std::cerr << "Не удалось открыть файл: " << filename << "\n";
         return false;
     }
 
-    int n;
-    if (!(in >> n) || n < 0) {
-        std::cerr << "В начале файла должно быть количество данных\n";
+    int layerCount;
+    if (!(f >> layerCount) || layerCount <= 0) {
+        std::cerr << "В начале файла должно быть число слоёв (> 0)\n";
         return false;
     }
 
-    data.clear();
+    in.layers.clear();
+    for (int i = 0; i < layerCount; i++) {
+        std::string name;
+        if (!(f >> name)) {
+            std::cerr << "Ожидалось " << layerCount << " слоёв, а в файле только " << i << "\n";
+            return false;
+        }
+        if (name != "FIFO" && name != "LRU" && name != "LFU" && name != "2Q") {
+            std::cerr << "Неизвестный слой: " << name << "\n";
+            return false;
+        }
+        in.layers.push_back(name);
+    }
+
+    int n;
+
+    f >> in.capacity;
+    f >> n;
+    in.data.clear();
     for (int i = 0; i < n; i++) {
         int x;
-        if (!(in >> x)) {
+        if (!(f >> x)) {
             std::cerr << "Ожидалось " << n << " чисел, а в файле только " << i << "\n";
             return false;
         }
-        data.push_back(x);
+        in.data.push_back(x);
     }
     return true;
 }
 
+Cache* makeCache(const std::string& name, int capacity) {
+    if (name == "FIFO") return new FIFOCache(capacity);
+    if (name == "LRU")  return new LRUCache(capacity);
+    if (name == "LFU")  return new LFUCache(capacity);
+    if (name == "2Q")   return new TwoQ_Cache(capacity);
+    return NULL;
+}
 int main(int argc, char** argv) {
+    Input in;
 
-    std::vector<int> data;
-    readData(argv[1], data);
-    std::set<int> s(data.begin(), data.end());
-    std::cout << "Идеальный кэш: " << data.size() - s.size()<< "\n";
-
-    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    std::cout<<fib(40)<<" ";
-    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(end - start).count();
-    std::cout << "without cache: Время: " << ms << " мс\n";
-
-    for(int i = 1; i < 15; i++){
-        std::cout << i << " ";
-
-
-
-        FIFOCache cache_FIFO(i);
-        start = std::chrono::steady_clock::now();
-        std::cout<<fib_cache(20, cache_FIFO)<<" ";
-        end = std::chrono::steady_clock::now();
-        ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "FIFO: " << ms << " мс ";
-
-        LRUCache cache_LRU(i);
-        start = std::chrono::steady_clock::now();
-        std::cout<<fib_cache(20, cache_LRU)<<" ";
-        end = std::chrono::steady_clock::now();
-        ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "LRU: " << ms << " мс ";
-
-        TwoQ_Cache cache_2Q(i);
-        start = std::chrono::steady_clock::now();
-        std::cout<<fib_cache(20, cache_2Q)<<" ";
-        end = std::chrono::steady_clock::now();
-        ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "2Q: " << ms << " мс ";
-
-        LFUCache cache_LFU(i);
-        start = std::chrono::steady_clock::now();
-        std::cout<<fib_cache(20, cache_LFU)<<" ";
-        end = std::chrono::steady_clock::now();
-        ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "LFU: " << ms << " мс\n";
-
+    readData(argv[1], in);
+    std::set<int> s(in.data.begin(), in.data.end());
+    std::cout << "Идеальный кэш: HITS:" << in.data.size() - s.size()<< "\n";
+    Cache *cache = makeCache(in.layers[0], in.capacity);
+    int hits = 0;
+    for(std::vector<int>::iterator it = in.data.begin();it != in.data.end(); ++it){
+        if (cache->get(*it) == -1) cache->put(*it, *it);
+        else hits++;
     }
+    std::cout << in.layers[0] << ": HITS: " << hits << "\n";
+    delete cache;
     return 0;
 }
